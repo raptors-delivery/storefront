@@ -31,7 +31,7 @@ export default class OrdersIndexController extends BaseController {
     @tracked updated_by;
     @tracked created_by;
     @tracked status;
-    @tracked currency = 'USD';
+    @tracked currency = 'EGP';
 
     @tracked queryParams = [
         'page',

@@ -17,7 +17,7 @@ class Store extends FleetbaseResource
      */
     public function toArray($request)
     {
-        $currency = $this->currency ?? 'USD';
+        $currency = $this->currency ?? 'EGP';
 
         return [
             'id'              => $this->when(Http::isInternalRequest(), $this->id, $this->public_id),
