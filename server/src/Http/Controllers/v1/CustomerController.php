@@ -13,6 +13,7 @@ use Fleetbase\FleetOps\Models\Contact;
 use Fleetbase\FleetOps\Models\Order;
 use Fleetbase\FleetOps\Models\Place;
 use Fleetbase\Http\Controllers\Controller;
+use Fleetbase\Models\File;
 use Fleetbase\Models\User;
 use Fleetbase\Models\UserDevice;
 use Fleetbase\Models\VerificationCode;
@@ -176,8 +177,8 @@ class CustomerController extends Controller
         }
 
         // verify code
-        $isVerified = VerificationCode::where(['code' => $code, 'for' => 'storefront_create_customer', 'meta->identity' => $identity])->exists();
-        if (!$isVerified) {
+        $verificationCode = VerificationCode::where(['code' => $code, 'for' => 'storefront_create_customer', 'meta->identity' => $identity])->exists();
+        if (!$verificationCode) {
             return response()->apiError('Invalid verification code provided!');
         }
 
@@ -209,6 +210,27 @@ class CustomerController extends Controller
             'storefront_id' => $about->public_id,
             'origin'        => 'storefront',
         ];
+
+        // Handle photo as either file id/ or base64 data string
+        $photo = $request->input('photo');
+        if ($photo) {
+            // Handle photo being a file id
+            if (Utils::isPublicId($photo)) {
+                $file = File::where('public_id', $photo)->first();
+                if ($file) {
+                    $input['photo_uuid'] = $file->uuid;
+                }
+            }
+
+            // Handle the photo being base64 data string
+            if (Utils::isBase64String($photo)) {
+                $path = implode('/', ['uploads', session('company'), 'customers']);
+                $file = File::createFromBase64($photo, null, $path);
+                if ($file) {
+                    $input['photo_uuid'] = $file->uuid;
+                }
+            }
+        }
 
         // create the customer/contact
         try {
@@ -267,6 +289,32 @@ class CustomerController extends Controller
                 'public_id'    => $request->input('place'),
                 'company_uuid' => session('company'),
             ]);
+        }
+
+        // Handle photo as either file id/ or base64 data string
+        $photo = $request->input('photo');
+        if ($photo) {
+            // Handle photo being a file id
+            if (Utils::isPublicId($photo)) {
+                $file = File::where('public_id', $photo)->first();
+                if ($file) {
+                    $input['photo_uuid'] = $file->uuid;
+                }
+            }
+
+            // Handle the photo being base64 data string
+            if (Utils::isBase64String($photo)) {
+                $path = implode('/', ['uploads', session('company'), 'customers']);
+                $file = File::createFromBase64($photo, null, $path);
+                if ($file) {
+                    $input['photo_uuid'] = $file->uuid;
+                }
+            }
+
+            // Handle removal key
+            if ($photo === 'REMOVE') {
+                $input['photo_uuid'] = null;
+            }
         }
 
         // update the contact
@@ -801,5 +849,100 @@ class CustomerController extends Controller
         } catch (\Exception $e) {
             return response()->apiError($e->getMessage());
         }
+    }
+
+    public function startAccountClosure(Request $request)
+    {
+        $about    = Storefront::about(['company_uuid']);
+        if (!$about) {
+            return response()->apiError('Storefront not found.');
+        }
+
+        $customer = Storefront::getCustomerFromToken();
+        if (!$customer) {
+            return response()->apiError('Not authorized to view customers places');
+        }
+
+        // Get the user account for the contact/customer
+        $user = User::where(['uuid' => $customer->user_uuid])->first();
+        if (!$user) {
+            return response()->apiError('Customer user account not found.');
+        }
+
+        // Check for phone or email
+        if (!$user->phone && !$user->email) {
+            return response()->apiError('Customer account must have a valid email or phone number linked.');
+        }
+
+        // Send account closure confirmation with code
+        try {
+            if ($user->phone) {
+                VerificationCode::generateSmsVerificationFor($user, 'storefront_account_closure', [
+                    'messageCallback' => function ($verification) use ($about) {
+                        return "Your {$about->name} account closure verification code is {$verification->code}";
+                    },
+                    'meta' => ['identity' => $user->phone],
+                ]);
+            } elseif ($user->email) {
+                VerificationCode::generateEmailVerificationFor($user, 'storefront_account_closure', [
+                    'subject'         => $about->name . ' account closure request',
+                    'messageCallback' => function ($verification) use ($about) {
+                        return "Your {$about->name} account closure verification code is {$verification->code}";
+                    },
+                    'meta' => ['identity' => $user->email],
+                ]);
+            }
+
+            return response()->json(['status' => 'OK']);
+        } catch (\Exception $e) {
+            return response()->apiError($e->getMessage());
+        }
+
+        return response()->apiError('An uknown error occured attempting to close customer account.');
+    }
+
+    public function confirmAccountClosure(Request $request)
+    {
+        $code     = $request->input('code');
+        $about    = Storefront::about(['company_uuid']);
+        if (!$about) {
+            return response()->apiError('Storefront not found.');
+        }
+
+        $customer = Storefront::getCustomerFromToken();
+        if (!$customer) {
+            return response()->apiError('Not authorized to view customers places');
+        }
+
+        // Get the user account for the contact/customer
+        $user = User::where(['uuid' => $customer->user_uuid])->first();
+        if (!$user) {
+            return response()->apiError('Customer user account not found.');
+        }
+
+        // Get verification identity
+        $identity = $user->phone ?? $user->email;
+
+        // verify account closure code
+        $verificationCode = VerificationCode::where(['code' => $code, 'for' => 'storefront_account_closure', 'meta->identity' => $identity])->exists();
+        if (!$verificationCode && $code !== config('storefront.storefront_app.bypass_verification_code')) {
+            return response()->apiError('Invalid verification code provided!');
+        }
+
+        try {
+            // If the user type is `contact` or `customer` delete the user account
+            if ($user->isType(['contact', 'customer'])) {
+                $user->delete();
+            }
+
+            // Delete the customer
+            $customer->delete();
+
+            return response()->json(['status' => 'OK']);
+        } catch (\Exception $e) {
+            return response()->apiError($e->getMessage());
+        }
+
+        return response()->apiError('An uknown error occured attempting to close customer account.');
     }
 }

@@ -73,6 +73,8 @@ Route::prefix(config('storefront.api.routing.prefix', 'storefront'))->namespace(
                 $router->group(['prefix' => 'products'], function () use ($router) {
                     $router->get('/', 'ProductController@query');
                     $router->get('{id}', 'ProductController@find');
+                    $router->post('/', 'ProductController@create');
+                    $router->put('{id}', 'ProductController@update');
                 });
 
                 // storefront/v1/food-trucks
@@ -113,6 +115,8 @@ Route::prefix(config('storefront.api.routing.prefix', 'storefront'))->namespace(
                     $router->post('request-creation-code', 'CustomerController@requestCustomerCreationCode');
                     $router->post('stripe-ephemeral-key', 'CustomerController@getStripeEphemeralKey');
                     $router->post('stripe-setup-intent', 'CustomerController@getStripeSetupIntent');
+                    $router->post('account-closure', 'CustomerController@startAccountClosure');
+                    $router->post('confirm-account-closure', 'CustomerController@confirmAccountClosure');
                 });
 
                 // hotfix! storefront-app sending customer update to /contacts/ route
